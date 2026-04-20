@@ -1,44 +1,40 @@
 import streamlit as st
 import yfinance as yf
 
-# 設定網頁標題與版面寬度
-st.set_page_config(page_title="美股預測與追蹤系統", layout="wide")
+# 1. 網頁基本設定
+st.set_page_config(page_title="美股智慧量化估值系統", layout="wide")
 
-# ==========================================
-# 1. 狀態初始化 (短期記憶)
-# ==========================================
-# 確保網頁重新整理時，清單和目前查詢的股票不會不見
+# 2. 記憶狀態初始化 (確保清單與選擇不因重新整理而消失)
 if 'watch_list' not in st.session_state:
-    st.session_state.watch_list = ["NVDA", "PLTR", "TSM"]
-    
+    st.session_state.watch_list = ["NVDA", "PLTR", "TSM", "AAPL", "MSFT"]
+
 if 'current_ticker' not in st.session_state:
     st.session_state.current_ticker = "NVDA"
 
-
 # ==========================================
-# 2. 側邊欄：我的追蹤清單系統
+# 3. 側邊欄：我的追蹤清單管理
 # ==========================================
 with st.sidebar:
     st.header("📋 我的追蹤清單")
 
-    # 新增紀錄的輸入框
+    # 新增功能
     col_input, col_btn = st.columns([4, 1])
     with col_input:
-        new_item = st.text_input("新增標的", label_visibility="collapsed", placeholder="例如: AAPL")
+        new_item = st.text_input("新增代號", label_visibility="collapsed", placeholder="例如: GOOG")
     with col_btn:
         if st.button("➕", use_container_width=True) and new_item:
             if new_item.upper() not in st.session_state.watch_list:
                 st.session_state.watch_list.append(new_item.upper())
-                st.rerun() # 重新載入網頁以更新畫面
-                
+                st.rerun()
+
     st.divider()
 
-    # 顯示與管理清單 (包含上下移動與刪除)
+    # 清單列表與操作
     for i, item in enumerate(st.session_state.watch_list):
         col_text, col_up, col_down, col_del = st.columns([4, 1, 1, 1])
         
         with col_text:
-            # 清單按鈕：點擊後更新主畫面的股票
+            # 點擊名稱即可切換主畫面分析對象
             if st.button(f"**{item}**", key=f"btn_{i}", use_container_width=True):
                 st.session_state.current_ticker = item
                 st.rerun()
@@ -58,67 +54,79 @@ with st.sidebar:
                 st.session_state.watch_list.pop(i)
                 st.rerun()
 
-
 # ==========================================
-# 3. 主畫面：美股預測與估值系統
+# 4. 主畫面：智慧量化估值系統
 # ==========================================
-st.title("🎯 美股預測與估值系統")
+st.title("🛡️ 美股智慧量化估值系統")
 
-# 主畫面的輸入框，預設值連動側邊欄點擊的標的
-ticker_symbol = st.text_input("目前查詢標的 (或手動輸入)", value=st.session_state.current_ticker).upper()
+# 輸入框連動側邊欄
+ticker_symbol = st.text_input("請輸入美股代號進行分析", value=st.session_state.current_ticker).upper()
 
 if ticker_symbol:
-    # 確保手動輸入時也能更新當前狀態
-    st.session_state.current_ticker = ticker_symbol 
+    st.session_state.current_ticker = ticker_symbol
     
-    with st.spinner(f"正在載入 {ticker_symbol} 的財務數據..."):
-        # 抓取 Yahoo Finance 數據
-        stock = yf.Ticker(ticker_symbol)
-        info = stock.info
-        
-        name = info.get("shortName", ticker_symbol)
-        current_price = info.get("currentPrice", 0)
-        fwd_eps = info.get("forwardEps", 0)
-        fwd_pe = info.get("forwardPE", 0)
-        
-        st.subheader(f"📊 {name} ({ticker_symbol})")
-        
-        # 判斷是否有足夠的資料進行估值 (ETF 或虧損公司通常沒有預估 EPS)
-        if fwd_eps and fwd_pe and current_price:
+    with st.spinner(f"系統正在連線華爾街資料庫，分析 {ticker_symbol}..."):
+        try:
+            stock = yf.Ticker(ticker_symbol)
+            info = stock.info
             
-            # 顯示基本數據
-            col1, col2, col3 = st.columns(3)
-            col1.metric("目前股價", f"${current_price:.2f}")
-            col2.metric("目前預估 EPS", f"${fwd_eps:.2f}")
-            col3.metric("目前市場 P/E", f"{fwd_pe:.2f}x")
+            # 基本資料擷取
+            name = info.get("shortName", ticker_symbol)
+            current_price = info.get("currentPrice", 0)
+            trailing_eps = info.get("trailingEps", 0)   # 過去12個月真實EPS
+            forward_eps = info.get("forwardEps", 0)      # 未來12個月預估EPS
+            forward_pe = info.get("forwardPE", 0)        # 目前預估P/E
             
-            st.divider()
+            st.subheader(f"📊 {name} ({ticker_symbol})")
             
-            # 互動預測區塊
-            st.write("### 🔮 一年後目標價預測模型")
-            st.info("請調整下方參數，模擬未來的營收成長與市場給予的估值倍數。")
+            if current_price > 0:
+                # 顯示目前即時報價
+                st.metric("目前即時股價", f"${current_price:.2f}")
+                
+                st.divider()
+
+                # --- 智慧預測模型邏輯 ---
+                if forward_eps and trailing_eps > 0 and forward_eps > trailing_eps:
+                    
+                    st.write("### 🧠 智慧量化模型分析 (PEG 估值法)")
+                    st.caption("本模型自動抓取華爾街機構共識數據，計算公司成長性與股價的匹配度。")
+
+                    # 1. 自動計算市場共識成長率 (Forward EPS vs Trailing EPS)
+                    auto_growth_rate = ((forward_eps - trailing_eps) / trailing_eps) * 100
+                    
+                    # 2. 自動計算目前 PEG (本益成長比)
+                    current_peg = forward_pe / auto_growth_rate
+                    
+                    # 3. 系統推算合理 P/E (基於 PEG = 1.5 的科技股標準環境)
+                    # 您也可以在這裡加入一個 slider 讓自己微調 PEG 基準
+                    peg_benchmark = 1.5 
+                    smart_target_pe = auto_growth_rate * peg_benchmark
+                    
+                    # 4. 最終計算目標價
+                    smart_target_price = forward_eps * smart_target_pe
+                    smart_upside = ((smart_target_price - current_price) / current_price) * 100
+
+                    # 顯示核心量化指標
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("共識 EPS 成長率", f"{auto_growth_rate:.2f}%")
+                    c2.metric("目前 PEG 值", f"{current_peg:.2f}", delta="估值過高" if current_peg > 2 else "估值合理", delta_color="inverse")
+                    c3.metric("智慧推算合理 P/E", f"{smart_target_pe:.2f}x")
+
+                    st.write("#### 💡 系統智慧評估結論")
+                    st.markdown(f"""
+                    基於 **{auto_growth_rate:.2f}%** 的預期盈餘成長力道：
+                    - 如果市場給予匹配成長的合理估值 (PEG={peg_benchmark})，合理本益比應為 **{smart_target_pe:.2f} 倍**。
+                    """)
+                    
+                    if smart_upside > 0:
+                        st.success(f"🎯 **智慧推算目標價：${smart_target_price:.2f}** (預期漲幅: **+{smart_upside:.2f}%**)")
+                        st.balloons()
+                    else:
+                        st.warning(f"⚠️ **系統提醒：目前股價可能已預支成長，合理回歸價為：${smart_target_price:.2f}** (目前溢價: **{smart_upside:.2f}%**)")
+
+                else:
+                    st.warning("⚠️ 此標的目前獲利成長動能不足、正在虧損或為 ETF，智慧成長模型不適用。")
+                    st.info("建議參考目前股價與歷史本益比區間進行判斷。")
             
-            col_slider1, col_slider2 = st.columns(2)
-            with col_slider1:
-                expected_growth = st.slider("預估未來一年 EPS 成長率 (%)", min_value=-20, max_value=100, value=15, step=1)
-            with col_slider2:
-                target_pe = st.slider("設定目標合理本益比 (倍)", min_value=5.0, max_value=100.0, value=float(fwd_pe), step=0.5)
-            
-            # 核心預測公式計算
-            future_eps = fwd_eps * (1 + (expected_growth / 100))
-            calculated_target = future_eps * target_pe
-            upside = ((calculated_target - current_price) / current_price) * 100
-            
-            # 顯示結論
-            st.write("#### 💡 估值結論")
-            st.write(f"若該公司 EPS 成長 **{expected_growth}%** 達到 **${future_eps:.2f}**，且市場願意給予 **{target_pe} 倍** 的本益比：")
-            
-            if upside > 0:
-                st.success(f"📈 預測一年後目標價為：**${calculated_target:.2f}** (潛在空間: **+{upside:.2f}%**)")
-            else:
-                st.error(f"📉 預測一年後目標價為：**${calculated_target:.2f}** (潛在空間: **{upside:.2f}%**)")
-            
-        else:
-            st.warning("無法取得該標的完整的預估 EPS 或 P/E 數據（常見於 ETF 或目前未獲利的公司）。")
-            if current_price:
-                st.metric("目前股價", f"${current_price:.2f}")
+        except Exception as e:
+            st.error(f"資料擷取失敗，請確認代號是否正確。錯誤訊息: {e}")
