@@ -90,4 +90,10 @@ if ticker_symbol:
             st.divider()
             
             st.write(f"### 💡 估值結論")
-            st.write(f"根據分析師預估之 EPS (${fwd_eps:.2f})
+            st.write(f"根據分析師預估之 EPS (${fwd_eps:.2f}) 與目前市場給予的 P/E ({fwd_pe:.2f}x)，")
+            st.info(f"目前的合理目標價推估為：**${calculated_target:.2f}** (潛在空間: {upside:.2f}%)")
+            
+        else:
+            st.warning("無法取得該標的的預估 EPS 或 P/E 數據（常見於 ETF 或虧損中的公司）。")
+            if current_price:
+                st.metric("目前股價", f"${current_price:.2f}")
