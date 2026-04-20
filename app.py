@@ -1,52 +1,22 @@
 import streamlit as st
 import yfinance as yf
-import pandas as pd
 
 # 1. 網頁基本設定
-st.set_page_config(page_title="美股智慧量化估值系統", layout="wide")
+st.set_page_config(page_title="美股核心估值戰情板", layout="wide")
 
-# ==========================================
-# 2. 核心功能：批次數據抓取與智慧排序
-# ==========================================
-@st.cache_data(ttl=300)
-def fetch_batch_data(tickers):
-    data = {}
-    for t in tickers:
-        try:
-            info = yf.Ticker(t).info
-            price = info.get("currentPrice", 0)
-            pe = info.get("forwardPE", 0)
-            fwd_eps = info.get("forwardEps", 0)
-            trail_eps = info.get("trailingEps", 0)
-            
-            # 計算初始智慧預期漲幅 (含55x P/E天花板)
-            upside = 0
-            if fwd_eps and trail_eps > 0 and fwd_eps > trail_eps and price > 0:
-                growth = ((fwd_eps - trail_eps) / trail_eps) * 100
-                target_pe = min(growth * 1.5, 55.0) 
-                target_price = fwd_eps * target_pe
-                upside = ((target_price - price) / price) * 100
-                
-            data[t] = {"price": price, "pe": pe, "upside": upside}
-        except:
-            data[t] = {"price": 0, "pe": 0, "upside": -999} 
-    return data
-
-# 3. 記憶狀態初始化
+# 2. 記憶狀態初始化
 if 'watch_list' not in st.session_state:
-    # 預設清單包含您關注的熱門標的與指數
-    st.session_state.watch_list = ["NVDA", "PLTR", "TSM", "AAPL", "MSFT", "VOO", "QQQ"]
+    st.session_state.watch_list = ["NVDA", "PLTR", "TSM", "AAPL", "MSFT", "VOO"]
 
 if 'current_ticker' not in st.session_state:
     st.session_state.current_ticker = "NVDA"
 
 # ==========================================
-# 4. 側邊欄：清單管理與自動排序
+# 3. 側邊欄：極簡追蹤清單
 # ==========================================
 with st.sidebar:
-    st.header("📋 我的追蹤清單")
+    st.header("📋 追蹤清單")
     
-    # 新增標的
     col_input, col_btn = st.columns([4, 1])
     with col_input:
         new_item = st.text_input("新增代號", label_visibility="collapsed", placeholder="例如: GOOG")
@@ -58,37 +28,11 @@ with st.sidebar:
 
     st.divider()
     
-    # 自動排序功能
-    st.write("📊 **智慧排序**")
-    sort_option = st.selectbox("選擇條件", ["選擇條件...", "股價 (高➡️低)", "預期漲幅 (高➡️低)", "本益比 (低➡️高)"])
-    if st.button("執行排序", use_container_width=True):
-        if sort_option != "選擇條件...":
-            with st.spinner("同步最新數據中..."):
-                metrics = fetch_batch_data(st.session_state.watch_list)
-                if sort_option == "股價 (高➡️低)":
-                    st.session_state.watch_list.sort(key=lambda x: metrics[x]["price"], reverse=True)
-                elif sort_option == "預期漲幅 (高➡️低)":
-                    st.session_state.watch_list.sort(key=lambda x: metrics[x]["upside"], reverse=True)
-                elif sort_option == "本益比 (低➡️高)":
-                    st.session_state.watch_list.sort(key=lambda x: metrics[x]["pe"] if metrics[x]["pe"] > 0 else 9999)
-            st.rerun()
-    
-    st.divider()
-    
-    # 清單列表操作 (手動排序與刪除)
     for i, item in enumerate(st.session_state.watch_list):
-        c_text, c_up, c_down, c_del = st.columns([4, 1, 1, 1])
+        c_text, c_del = st.columns([4, 1])
         with c_text:
             if st.button(f"**{item}**", key=f"btn_{i}", use_container_width=True):
                 st.session_state.current_ticker = item
-                st.rerun()
-        with c_up:
-            if i > 0 and st.button("⬆️", key=f"up_{i}"):
-                st.session_state.watch_list[i], st.session_state.watch_list[i-1] = st.session_state.watch_list[i-1], st.session_state.watch_list[i]
-                st.rerun()
-        with c_down:
-            if i < len(st.session_state.watch_list) - 1 and st.button("⬇️", key=f"down_{i}"):
-                st.session_state.watch_list[i], st.session_state.watch_list[i+1] = st.session_state.watch_list[i+1], st.session_state.watch_list[i]
                 st.rerun()
         with c_del:
             if st.button("❌", key=f"del_{i}"):
@@ -96,89 +40,82 @@ with st.sidebar:
                 st.rerun()
 
 # ==========================================
-# 5. 主畫面：真實世界多階段預測模型 (新增天花板滑桿)
+# 4. 主畫面：五大核心數據儀表板
 # ==========================================
-st.title("🛡️ 美股智慧量化估值系統")
+st.title("🎯 美股核心估值戰情板")
+st.markdown("專注於當下估值與短期成長動能，捨棄無效的長線預測。")
 
 ticker_symbol = st.text_input("請輸入美股代號進行分析", value=st.session_state.current_ticker).upper()
 
 if ticker_symbol:
     st.session_state.current_ticker = ticker_symbol
-    with st.spinner(f"正在連線華爾街資料庫分析 {ticker_symbol}..."):
+    with st.spinner(f"正在擷取 {ticker_symbol} 的最新核心數據..."):
         try:
             stock = yf.Ticker(ticker_symbol)
             info = stock.info
             name = info.get("shortName", ticker_symbol)
+            
+            # 抓取原始數據
             current_price = info.get("currentPrice", 0)
-            trailing_eps = info.get("trailingEps", 0)
             forward_eps = info.get("forwardEps", 0)
             forward_pe = info.get("forwardPE", 0)
+            trailing_eps = info.get("trailingEps", 0)
             
             st.subheader(f"📊 {name} ({ticker_symbol})")
+            
             if current_price > 0:
-                st.metric("目前即時股價", f"${current_price:.2f}")
+                # 計算成長率與 PEG
+                growth_rate = 0
+                peg_ratio = 0
+                if forward_eps and trailing_eps and trailing_eps > 0 and forward_eps > trailing_eps:
+                    growth_rate = ((forward_eps - trailing_eps) / trailing_eps) * 100
+                    if growth_rate > 0:
+                        peg_ratio = forward_pe / growth_rate
+
+                # --- 第一排：價格與絕對估值 ---
+                st.write("### 💰 基礎估值指標")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("現在股價 (Current Price)", f"${current_price:.2f}")
+                
+                if forward_eps:
+                    col2.metric("預估每股盈餘 (Forward EPS)", f"${forward_eps:.2f}", "未來 12 個月預期")
+                else:
+                    col2.metric("預估每股盈餘 (Forward EPS)", "無資料")
+                    
+                if forward_pe:
+                    col3.metric("預估本益比 (Forward P/E)", f"{forward_pe:.2f}x", "市場目前給予的定價倍數")
+                else:
+                    col3.metric("預估本益比 (Forward P/E)", "無資料")
+
                 st.divider()
 
-                if forward_eps and trailing_eps > 0 and forward_eps > trailing_eps:
-                    st.write("### 🧠 真實世界長線衰退模型分析")
-                    st.caption("模型參數：終端成長率回歸 6%、終端 P/E 回歸 25x、年通膨率 3%。")
+                # --- 第二排：成長與相對估值 ---
+                st.write("### 🚀 成長動能指標 (PEG 模型)")
+                if growth_rate > 0 and peg_ratio > 0:
+                    col4, col5 = st.columns(2)
+                    col4.metric("預期成長率 (Expected Growth)", f"{growth_rate:.2f}%", "基於近四季與未來預估之增幅")
                     
-                    # 💎 新增：讓使用者自訂 P/E 天花板 (預設下修至更合理的 35 倍)
-                    pe_cap = st.slider(
-                        "設定本益比絕對上限 (安全邊際)", 
-                        min_value=15.0, 
-                        max_value=60.0, 
-                        value=35.0, 
-                        step=1.0,
-                        help="成熟科技股長期合理本益比約為 25-35 倍。設定越低，預測越保守安全。"
-                    )
-                    
-                    # 1. 初始參數計算 (套用自訂天花板)
-                    initial_growth = ((forward_eps - trailing_eps) / trailing_eps) * 100
-                    initial_pe = min(initial_growth * 1.5, pe_cap) 
-                    
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("初始 EPS 成長率", f"{initial_growth:.2f}%")
-                    c2.metric("初始推算 P/E", f"{initial_pe:.2f}x", delta="已觸發上限" if initial_growth * 1.5 > pe_cap else None, delta_color="off")
-                    c3.metric("目前 PEG 值", f"{forward_pe / initial_growth:.2f}")
-
-                    # 2. 模擬未來 10 年 (衰退模型)
-                    terminal_growth = 6.0
-                    terminal_pe = 25.0
-                    inflation_rate = 3.0
-                    
-                    projection_data = []
-                    temp_eps = forward_eps
-                    
-                    for year in range(1, 11):
-                        decay = (year - 1) / 9.0
+                    # 依據 PEG 給予不同的顏色與提示
+                    if peg_ratio <= 1.0:
+                        peg_status = "被低估 (強烈吸引力)"
+                        delta_color = "normal"
+                    elif peg_ratio <= 1.5:
+                        peg_status = "估值合理 (具備投資價值)"
+                        delta_color = "off"
+                    elif peg_ratio <= 2.0:
+                        peg_status = "估值偏高 (需注意風險)"
+                        delta_color = "inverse"
+                    else:
+                        peg_status = "估值過熱 (透支未來成長)"
+                        delta_color = "inverse"
                         
-                        curr_growth = initial_growth - (initial_growth - terminal_growth) * decay
-                        curr_pe = initial_pe - (initial_pe - terminal_pe) * decay
-                        
-                        if year > 1:
-                            temp_eps = temp_eps * (1 + curr_growth / 100)
-                        
-                        nominal_price = temp_eps * curr_pe
-                        real_price = nominal_price / ((1 + inflation_rate / 100) ** year)
-                        real_return = ((real_price - current_price) / current_price) * 100
-                        
-                        if year in [1, 2, 3, 5, 10]:
-                            projection_data.append({
-                                "時間": f"{year} 年後",
-                                "預估成長率": f"{curr_growth:.1f}%",
-                                "合理 P/E": f"{curr_pe:.1f}x",
-                                "名目股價": f"${nominal_price:.2f}",
-                                "實質價值 (扣通膨)": f"${real_price:.2f}",
-                                "實質報酬率": f"{real_return:.2f}%"
-                            })
+                    col5.metric("本益成長比 (PEG Ratio)", f"{peg_ratio:.2f}", peg_status, delta_color=delta_color)
                     
-                    st.table(pd.DataFrame(projection_data))
-                    st.info("💡 註：'實質價值' 代表將未來的錢換算成現在購買力的價值，這才是最準確的投資參考。")
-
+                    # 簡單明瞭的白話文結論
+                    st.info(f"**戰情解讀**：市場預期該公司未來盈餘將成長 **{growth_rate:.1f}%**。結合目前 **{forward_pe:.1f} 倍** 的本益比，得出 PEG 值為 **{peg_ratio:.2f}**，目前的定價狀態屬於「**{peg_status}**」。")
+                    
                 else:
-                    st.warning("⚠️ 此標的獲利成長動能不足、目前虧損或為 ETF，不適用智慧成長模型。")
-                    st.info(f"該標的目前預估 P/E 為 {forward_pe:.2f}x，建議參考歷史區間評估。")
-            
+                    st.warning("⚠️ 此標的目前缺乏足夠的 EPS 成長數據，或呈現衰退，無法計算預期成長率與 PEG。建議直接參考歷史本益比區間。")
+                    
         except Exception as e:
-            st.error(f"分析失敗，請檢查代號是否正確。錯誤代碼: {e}")
+            st.error(f"資料擷取失敗，請確認代號是否正確。錯誤訊息: {e}")
