@@ -1,21 +1,25 @@
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(page_title="美股估值與追蹤系統", layout="wide")
+# 設定網頁標題與版面寬度
+st.set_page_config(page_title="美股預測與追蹤系統", layout="wide")
 
 # ==========================================
-# 1. 側邊欄：我的追蹤清單系統
+# 1. 狀態初始化 (短期記憶)
+# ==========================================
+# 確保網頁重新整理時，清單和目前查詢的股票不會不見
+if 'watch_list' not in st.session_state:
+    st.session_state.watch_list = ["NVDA", "PLTR", "TSM"]
+    
+if 'current_ticker' not in st.session_state:
+    st.session_state.current_ticker = "NVDA"
+
+
+# ==========================================
+# 2. 側邊欄：我的追蹤清單系統
 # ==========================================
 with st.sidebar:
     st.header("📋 我的追蹤清單")
-    
-    # 初始化 Session State (建立短期記憶)
-    if 'watch_list' not in st.session_state:
-        st.session_state.watch_list = ["NVDA", "PLTR", "TSM"]
-    
-    # 記錄目前主畫面正在查看的標的
-    if 'current_ticker' not in st.session_state:
-        st.session_state.current_ticker = "NVDA"
 
     # 新增紀錄的輸入框
     col_input, col_btn = st.columns([4, 1])
@@ -25,17 +29,16 @@ with st.sidebar:
         if st.button("➕", use_container_width=True) and new_item:
             if new_item.upper() not in st.session_state.watch_list:
                 st.session_state.watch_list.append(new_item.upper())
-                st.rerun()
+                st.rerun() # 重新載入網頁以更新畫面
                 
     st.divider()
 
-    # 顯示與管理清單
+    # 顯示與管理清單 (包含上下移動與刪除)
     for i, item in enumerate(st.session_state.watch_list):
-        # 切割版面：按鈕(寬) / 往上 / 往下 / 刪除
         col_text, col_up, col_down, col_del = st.columns([4, 1, 1, 1])
         
         with col_text:
-            # 將清單變成按鈕，點擊後更新主畫面的股票
+            # 清單按鈕：點擊後更新主畫面的股票
             if st.button(f"**{item}**", key=f"btn_{i}", use_container_width=True):
                 st.session_state.current_ticker = item
                 st.rerun()
@@ -55,10 +58,11 @@ with st.sidebar:
                 st.session_state.watch_list.pop(i)
                 st.rerun()
 
+
 # ==========================================
-# 2. 主畫面：美股 EPS & P/E 估值系統
+# 3. 主畫面：美股預測與估值系統
 # ==========================================
-st.title("🎯 美股 EPS & P/E 估值系統")
+st.title("🎯 美股預測與估值系統")
 
 # 主畫面的輸入框，預設值連動側邊欄點擊的標的
 ticker_symbol = st.text_input("目前查詢標的 (或手動輸入)", value=st.session_state.current_ticker).upper()
@@ -68,6 +72,7 @@ if ticker_symbol:
     st.session_state.current_ticker = ticker_symbol 
     
     with st.spinner(f"正在載入 {ticker_symbol} 的財務數據..."):
+        # 抓取 Yahoo Finance 數據
         stock = yf.Ticker(ticker_symbol)
         info = stock.info
         
@@ -78,22 +83,42 @@ if ticker_symbol:
         
         st.subheader(f"📊 {name} ({ticker_symbol})")
         
-        if fwd_eps and fwd_pe:
-            calculated_target = fwd_eps * fwd_pe
-            upside = ((calculated_target - current_price) / current_price) * 100
+        # 判斷是否有足夠的資料進行估值 (ETF 或虧損公司通常沒有預估 EPS)
+        if fwd_eps and fwd_pe and current_price:
             
+            # 顯示基本數據
             col1, col2, col3 = st.columns(3)
             col1.metric("目前股價", f"${current_price:.2f}")
-            col2.metric("預估 EPS (Forward)", f"${fwd_eps:.2f}")
-            col3.metric("預估本益比 (Forward)", f"{fwd_pe:.2f}x")
+            col2.metric("目前預估 EPS", f"${fwd_eps:.2f}")
+            col3.metric("目前市場 P/E", f"{fwd_pe:.2f}x")
             
             st.divider()
             
-            st.write(f"### 💡 估值結論")
-            st.write(f"根據分析師預估之 EPS (${fwd_eps:.2f}) 與目前市場給予的 P/E ({fwd_pe:.2f}x)，")
-            st.info(f"目前的合理目標價推估為：**${calculated_target:.2f}** (潛在空間: {upside:.2f}%)")
+            # 互動預測區塊
+            st.write("### 🔮 一年後目標價預測模型")
+            st.info("請調整下方參數，模擬未來的營收成長與市場給予的估值倍數。")
+            
+            col_slider1, col_slider2 = st.columns(2)
+            with col_slider1:
+                expected_growth = st.slider("預估未來一年 EPS 成長率 (%)", min_value=-20, max_value=100, value=15, step=1)
+            with col_slider2:
+                target_pe = st.slider("設定目標合理本益比 (倍)", min_value=5.0, max_value=100.0, value=float(fwd_pe), step=0.5)
+            
+            # 核心預測公式計算
+            future_eps = fwd_eps * (1 + (expected_growth / 100))
+            calculated_target = future_eps * target_pe
+            upside = ((calculated_target - current_price) / current_price) * 100
+            
+            # 顯示結論
+            st.write("#### 💡 估值結論")
+            st.write(f"若該公司 EPS 成長 **{expected_growth}%** 達到 **${future_eps:.2f}**，且市場願意給予 **{target_pe} 倍** 的本益比：")
+            
+            if upside > 0:
+                st.success(f"📈 預測一年後目標價為：**${calculated_target:.2f}** (潛在空間: **+{upside:.2f}%**)")
+            else:
+                st.error(f"📉 預測一年後目標價為：**${calculated_target:.2f}** (潛在空間: **{upside:.2f}%**)")
             
         else:
-            st.warning("無法取得該標的的預估 EPS 或 P/E 數據（常見於 ETF 或虧損中的公司）。")
+            st.warning("無法取得該標的完整的預估 EPS 或 P/E 數據（常見於 ETF 或目前未獲利的公司）。")
             if current_price:
                 st.metric("目前股價", f"${current_price:.2f}")
