@@ -96,7 +96,7 @@ with st.sidebar:
                 st.rerun()
 
 # ==========================================
-# 5. 主畫面：真實世界多階段預測模型
+# 5. 主畫面：真實世界多階段預測模型 (新增天花板滑桿)
 # ==========================================
 st.title("🛡️ 美股智慧量化估值系統")
 
@@ -119,18 +119,27 @@ if ticker_symbol:
                 st.metric("目前即時股價", f"${current_price:.2f}")
                 st.divider()
 
-                # 判斷是否適用成長模型
                 if forward_eps and trailing_eps > 0 and forward_eps > trailing_eps:
                     st.write("### 🧠 真實世界長線衰退模型分析")
-                    st.caption("模型參數：P/E 上限 55x、終端成長率回歸 6%、終端 P/E 回歸 25x、年通膨率 3%。")
+                    st.caption("模型參數：終端成長率回歸 6%、終端 P/E 回歸 25x、年通膨率 3%。")
                     
-                    # 1. 初始參數計算 (第1年)
+                    # 💎 新增：讓使用者自訂 P/E 天花板 (預設下修至更合理的 35 倍)
+                    pe_cap = st.slider(
+                        "設定本益比絕對上限 (安全邊際)", 
+                        min_value=15.0, 
+                        max_value=60.0, 
+                        value=35.0, 
+                        step=1.0,
+                        help="成熟科技股長期合理本益比約為 25-35 倍。設定越低，預測越保守安全。"
+                    )
+                    
+                    # 1. 初始參數計算 (套用自訂天花板)
                     initial_growth = ((forward_eps - trailing_eps) / trailing_eps) * 100
-                    initial_pe = min(initial_growth * 1.5, 55.0) 
+                    initial_pe = min(initial_growth * 1.5, pe_cap) 
                     
                     c1, c2, c3 = st.columns(3)
                     c1.metric("初始 EPS 成長率", f"{initial_growth:.2f}%")
-                    c2.metric("初始推算 P/E", f"{initial_pe:.2f}x", delta="已觸發上限" if initial_growth * 1.5 > 55 else None)
+                    c2.metric("初始推算 P/E", f"{initial_pe:.2f}x", delta="已觸發上限" if initial_growth * 1.5 > pe_cap else None, delta_color="off")
                     c3.metric("目前 PEG 值", f"{forward_pe / initial_growth:.2f}")
 
                     # 2. 模擬未來 10 年 (衰退模型)
@@ -142,17 +151,14 @@ if ticker_symbol:
                     temp_eps = forward_eps
                     
                     for year in range(1, 11):
-                        # 線性衰退係數 (0 到 1)
                         decay = (year - 1) / 9.0
                         
-                        # 當年成長率與 P/E 隨時間滑落
                         curr_growth = initial_growth - (initial_growth - terminal_growth) * decay
                         curr_pe = initial_pe - (initial_pe - terminal_pe) * decay
                         
                         if year > 1:
                             temp_eps = temp_eps * (1 + curr_growth / 100)
                         
-                        # 名目股價與實質股價 (扣除通膨)
                         nominal_price = temp_eps * curr_pe
                         real_price = nominal_price / ((1 + inflation_rate / 100) ** year)
                         real_return = ((real_price - current_price) / current_price) * 100
