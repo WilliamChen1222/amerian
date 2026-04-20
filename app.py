@@ -1,95 +1,7 @@
-import streamlit as st
-import yfinance as yf
-import pandas as pd
-
-# 1. 網頁基本設定
-st.set_page_config(page_title="美股智慧量化估值系統", layout="wide")
-
-# 2. 核心功能：批次數據抓取
-@st.cache_data(ttl=300)
-def fetch_batch_data(tickers):
-    data = {}
-    for t in tickers:
-        try:
-            info = yf.Ticker(t).info
-            price = info.get("currentPrice", 0)
-            pe = info.get("forwardPE", 0)
-            fwd_eps = info.get("forwardEps", 0)
-            trail_eps = info.get("trailingEps", 0)
-            
-            upside = 0
-            if fwd_eps and trail_eps > 0 and fwd_eps > trail_eps and price > 0:
-                growth = ((fwd_eps - trail_eps) / trail_eps) * 100
-                # 這裡也同步套用 55 倍天花板
-                target_pe = min(growth * 1.5, 55.0) 
-                target_price = fwd_eps * target_pe
-                upside = ((target_price - price) / price) * 100
-                
-            data[t] = {"price": price, "pe": pe, "upside": upside}
-        except:
-            data[t] = {"price": 0, "pe": 0, "upside": -999} 
-    return data
-
-# 3. 記憶狀態初始化
-if 'watch_list' not in st.session_state:
-    st.session_state.watch_list = ["NVDA", "PLTR", "TSM", "AAPL", "VOO", "QQQ"]
-
-if 'current_ticker' not in st.session_state:
-    st.session_state.current_ticker = "NVDA"
-
 # ==========================================
-# 4. 側邊欄：清單與排序
+# 5. 主畫面：真實世界多階段衰退模型
 # ==========================================
-with st.sidebar:
-    st.header("📋 我的追蹤清單")
-    col_input, col_btn = st.columns([4, 1])
-    with col_input:
-        new_item = st.text_input("新增代號", label_visibility="collapsed", placeholder="例如: MSFT")
-    with col_btn:
-        if st.button("➕", use_container_width=True) and new_item:
-            if new_item.upper() not in st.session_state.watch_list:
-                st.session_state.watch_list.append(new_item.upper())
-                st.rerun()
-
-    st.divider()
-    st.write("📊 **自動排序清單**")
-    sort_option = st.selectbox("選擇排序條件", ["選擇條件...", "股價 (高➡️低)", "預期漲幅 (高➡️低)", "本益比 (低➡️高)"])
-    if st.button("執行排序", use_container_width=True):
-        if sort_option != "選擇條件...":
-            with st.spinner("更新數據中..."):
-                metrics = fetch_batch_data(st.session_state.watch_list)
-                if sort_option == "股價 (高➡️低)":
-                    st.session_state.watch_list.sort(key=lambda x: metrics[x]["price"], reverse=True)
-                elif sort_option == "預期漲幅 (高➡️低)":
-                    st.session_state.watch_list.sort(key=lambda x: metrics[x]["upside"], reverse=True)
-                elif sort_option == "本益比 (低➡️高)":
-                    st.session_state.watch_list.sort(key=lambda x: metrics[x]["pe"] if metrics[x]["pe"] > 0 else 9999)
-            st.rerun()
-    
-    st.divider()
-    for i, item in enumerate(st.session_state.watch_list):
-        c_text, c_up, c_down, c_del = st.columns([4, 1, 1, 1])
-        with c_text:
-            if st.button(f"**{item}**", key=f"btn_{i}", use_container_width=True):
-                st.session_state.current_ticker = item
-                st.rerun()
-        with c_up:
-            if i > 0 and st.button("⬆️", key=f"up_{i}"):
-                st.session_state.watch_list[i], st.session_state.watch_list[i-1] = st.session_state.watch_list[i-1], st.session_state.watch_list[i]
-                st.rerun()
-        with c_down:
-            if i < len(st.session_state.watch_list) - 1 and st.button("⬇️", key=f"down_{i}"):
-                st.session_state.watch_list[i], st.session_state.watch_list[i+1] = st.session_state.watch_list[i+1], st.session_state.watch_list[i]
-                st.rerun()
-        with c_del:
-            if st.button("❌", key=f"del_{i}"):
-                st.session_state.watch_list.pop(i)
-                st.rerun()
-
-# ==========================================
-# 5. 主畫面：智慧估值與複利預測
-# ==========================================
-st.title("🛡️ 美股智慧量化估值系統")
+st.title("🛡️ 美股智慧量化估值系統 (含長線衰退模型)")
 
 ticker_symbol = st.text_input("請輸入美股代號進行分析", value=st.session_state.current_ticker).upper()
 
@@ -111,36 +23,64 @@ if ticker_symbol:
                 st.divider()
 
                 if forward_eps and trailing_eps > 0 and forward_eps > trailing_eps:
-                    st.write("### 🧠 智慧量化模型分析 (已加入 55x P/E 天花板)")
+                    st.write("### 🧠 智慧量化模型分析 (第1年基礎)")
                     
-                    # 成長率與智慧 P/E 計算
-                    auto_growth_rate = ((forward_eps - trailing_eps) / trailing_eps) * 100
-                    raw_target_pe = auto_growth_rate * 1.5
-                    # 核心改動：加入 55 倍上限
-                    smart_target_pe = min(raw_target_pe, 55.0) 
+                    # 第一年的初始爆發成長率
+                    initial_growth_rate = ((forward_eps - trailing_eps) / trailing_eps) * 100
+                    initial_target_pe = min(initial_growth_rate * 1.5, 55.0) 
                     
                     c1, c2, c3 = st.columns(3)
-                    c1.metric("共識 EPS 成長率", f"{auto_growth_rate:.2f}%")
-                    c2.metric("智慧推算合理 P/E", f"{smart_target_pe:.2f}x", delta="已達天花板" if raw_target_pe > 55 else None)
-                    c3.metric("目前 PEG 值", f"{forward_pe / auto_growth_rate:.2f}")
+                    c1.metric("初始 EPS 成長率", f"{initial_growth_rate:.2f}%")
+                    c2.metric("初始推算 P/E", f"{initial_target_pe:.2f}x")
+                    c3.metric("目前 PEG 值", f"{forward_pe / initial_growth_rate:.2f}")
 
-                    # --- 10年預測表 ---
-                    st.write("#### ⏳ 長線複利股價預測")
+                    # --- 10年真實世界預測表 (導入衰退與通膨) ---
+                    st.write("#### ⏳ 真實世界長線股價預測 (考慮成長衰退與通膨)")
+                    st.caption("模型假設：公司無法永遠維持爆發成長。第10年成長率將衰退至 6%，本益比將收斂至 25 倍，且每年扣除 3% 通貨膨脹率。")
+                    
+                    # 設定真實世界參數
+                    terminal_growth = 6.0 # 第10年只剩6%成長
+                    terminal_pe = 25.0    # 終極本益比降到25倍
+                    inflation_rate = 3.0  # 每年3%通膨
+                    
                     projection_data = []
-                    for year in [1, 2, 5, 10]:
-                        # 複利公式：Year 1 使用 Forward EPS，之後每年按成長率複利
-                        future_eps = forward_eps * ((1 + auto_growth_rate/100) ** (year - 1))
-                        target_price = future_eps * smart_target_pe
-                        total_return = ((target_price - current_price) / current_price) * 100
-                        projection_data.append({
-                            "預測時間": f"{year} 年後",
-                            "預估每股盈餘 (EPS)": f"${future_eps:.2f}",
-                            "目標股價推算": f"${target_price:.2f}",
-                            "累計預期報酬率": f"{total_return:.2f}%"
-                        })
+                    current_eps = forward_eps
+                    
+                    # 逐年模擬計算
+                    for year in range(1, 11):
+                        # 1. 計算當年度的衰退成長率 (線性遞減)
+                        # 例如: 從 40% 慢慢每年扣一點，直到第 10 年變成 6%
+                        decay_factor = (year - 1) / 9.0  # 0 到 1
+                        current_growth = initial_growth_rate - (initial_growth_rate - terminal_growth) * decay_factor
+                        
+                        # 第一年用 forward_eps，第二年起開始用當年的成長率滾動
+                        if year > 1:
+                            current_eps = current_eps * (1 + current_growth / 100)
+                            
+                        # 2. 計算當年度的估值收縮 (P/E 慢慢降低)
+                        current_pe = initial_target_pe - (initial_target_pe - terminal_pe) * decay_factor
+                        
+                        # 3. 計算名目股價 (表面上看到的股價)
+                        nominal_price = current_eps * current_pe
+                        
+                        # 4. 計算實質股價 (扣除通膨後的真實購買力)
+                        real_price = nominal_price / ((1 + inflation_rate / 100) ** year)
+                        
+                        total_real_return = ((real_price - current_price) / current_price) * 100
+                        
+                        # 只取特定年份顯示在表格中
+                        if year in [1, 2, 5, 10]:
+                            projection_data.append({
+                                "時間": f"{year} 年後",
+                                "當下成長率": f"{current_growth:.1f}%",
+                                "給予本益比": f"{current_pe:.1f}x",
+                                "預估 EPS": f"${current_eps:.2f}",
+                                "帳面股價 (名目)": f"${nominal_price:.2f}",
+                                "真實價值 (扣通膨)": f"${real_price:.2f}",
+                                "實質報酬率": f"{total_real_return:.2f}%"
+                            })
                     
                     st.table(pd.DataFrame(projection_data))
-                    st.caption(f"💡 註：1年後預估係基於 Forward EPS 乘上合理 P/E。2年起假設公司維持相同成長動能進行複利計算。")
 
                 else:
                     st.warning("⚠️ 此標的獲利成長動能不足或為 ETF，不適用智慧成長模型。")
